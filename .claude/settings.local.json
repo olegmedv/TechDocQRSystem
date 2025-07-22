@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(mkdir:*)",
+      "Bash(dotnet new:*)",
+      "Bash(chmod:*)",
+      "Bash(dotnet run:*)",
+      "Bash(npm install:*)",
+      "Bash(rm:*)",
+      "Bash(dotnet ef migrations:*)",
+      "Bash(touch:*)"
+    ],
+    "deny": []
+  }
+}
