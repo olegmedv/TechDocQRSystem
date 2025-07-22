@@ -1,4 +1,7 @@
 using Tesseract;
+using iText.Kernel.Pdf;
+using iText.Kernel.Pdf.Canvas.Parser;
+using iText.Kernel.Pdf.Canvas.Parser.Listener;
 
 namespace TechDocQRSystem.Api.Services;
 
@@ -58,6 +61,81 @@ public class TesseractOcrService : IOcrService
             _logger.LogError(ex, "OCR failed for file {FilePath}", filePath);
             return string.Empty;
         }
+    }
+
+    public async Task<string> ExtractTextFromFirstPageAsync(string filePath, string mimeType)
+    {
+        try
+        {
+            if (!File.Exists(filePath))
+            {
+                throw new FileNotFoundException($"File not found: {filePath}");
+            }
+
+            // For PDF files, extract text directly (no OCR needed for text-based PDFs)
+            if (mimeType.ToLowerInvariant() == "application/pdf")
+            {
+                var text = await ExtractTextFromPdfAsync(filePath);
+                if (!string.IsNullOrEmpty(text))
+                {
+                    return text;
+                }
+                else
+                {
+                    _logger.LogWarning("No text found in PDF: {FilePath}", filePath);
+                    return "PDF не содержит распознаваемого текста";
+                }
+            }
+            else if (IsImageFile(mimeType))
+            {
+                // For image files, extract text normally
+                return await ExtractTextAsync(filePath);
+            }
+            else
+            {
+                _logger.LogWarning("Unsupported file type for OCR: {MimeType}", mimeType);
+                return "Неподдерживаемый тип файла для OCR";
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to extract text from first page: {FilePath}", filePath);
+            return "Ошибка при извлечении текста";
+        }
+    }
+
+    private async Task<string> ExtractTextFromPdfAsync(string pdfPath)
+    {
+        return await Task.Run(() =>
+        {
+            try
+            {
+                _logger.LogInformation("Extracting text directly from PDF: {PdfPath}", pdfPath);
+                
+                using var reader = new PdfReader(pdfPath);
+                using var document = new PdfDocument(reader);
+                
+                if (document.GetNumberOfPages() == 0)
+                {
+                    _logger.LogWarning("PDF has no pages: {PdfPath}", pdfPath);
+                    return string.Empty;
+                }
+
+                // Extract text from first page only
+                var page = document.GetFirstPage();
+                var strategy = new SimpleTextExtractionStrategy();
+                var text = PdfTextExtractor.GetTextFromPage(page, strategy);
+                
+                _logger.LogInformation("Extracted {TextLength} characters from PDF first page", text?.Length ?? 0);
+                
+                return text?.Trim() ?? string.Empty;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "PDF text extraction failed: {PdfPath}", pdfPath);
+                return string.Empty;
+            }
+        });
     }
 
     public bool IsImageFile(string mimeType)

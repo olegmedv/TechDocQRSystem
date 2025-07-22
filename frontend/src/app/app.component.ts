@@ -143,7 +143,7 @@ import { AuthService } from "./services/auth.service";
       }
 
       .inner-layout {
-        margin-left: 200px;
+        /* Убираем фиксированный отступ - nz-layout сам управляет размещением */
       }
 
       .header {
@@ -199,20 +199,31 @@ import { AuthService } from "./services/auth.service";
       }
 
       .content {
-        margin: 24px 16px;
+        margin: 0;
         padding: 24px;
-        background: #fff;
-        min-height: calc(100vh - 112px);
-        border-radius: 4px;
+        background: #f0f2f5;
+        min-height: calc(100vh - 64px);
+        overflow: auto;
       }
 
       .auth-layout {
         min-height: 100vh;
       }
 
+      /* Убираем границы между сайдбаром и контентом */
+      nz-sider {
+        box-shadow: 2px 0 6px rgba(0, 21, 41, 0.35);
+        z-index: 100;
+      }
+
+      /* Улучшаем стили для маленьких экранов */
       @media (max-width: 768px) {
-        .inner-layout {
-          margin-left: 0;
+        .content {
+          padding: 16px;
+        }
+        
+        .logo h3 {
+          font-size: 14px;
         }
       }
     `,

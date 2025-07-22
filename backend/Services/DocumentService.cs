@@ -13,11 +13,12 @@ public class DocumentService : IDocumentService
     private readonly IQrCodeService _qrCodeService;
     private readonly IActivityLogService _activityLogService;
     private readonly ILogger<DocumentService> _logger;
+    private readonly IServiceScopeFactory _serviceScopeFactory;
 
     public DocumentService(ApplicationDbContext context, IConfiguration configuration,
                          IOcrService ocrService, IGeminiService geminiService, 
                          IQrCodeService qrCodeService, IActivityLogService activityLogService,
-                         ILogger<DocumentService> logger)
+                         ILogger<DocumentService> logger, IServiceScopeFactory serviceScopeFactory)
     {
         _context = context;
         _configuration = configuration;
@@ -26,6 +27,7 @@ public class DocumentService : IDocumentService
         _qrCodeService = qrCodeService;
         _activityLogService = activityLogService;
         _logger = logger;
+        _serviceScopeFactory = serviceScopeFactory;
     }
 
     public async Task<DocumentResponseDto> UploadDocumentAsync(IFormFile file, Guid userId, string ipAddress, string? userAgent)
@@ -132,6 +134,119 @@ public class DocumentService : IDocumentService
         return result;
     }
 
+    public async Task<List<DocumentResponseDto>> GetAllDocumentsAsync()
+    {
+        var documents = await _context.Documents
+            .Include(d => d.User)
+            .OrderByDescending(d => d.CreatedAt)
+            .ToListAsync();
+
+        var result = new List<DocumentResponseDto>();
+        foreach (var doc in documents)
+        {
+            result.Add(await CreateDocumentResponseDto(doc));
+        }
+
+        return result;
+    }
+
+    public async Task<(Stream fileStream, string fileName, string contentType)> DownloadDocumentByIdAsync(Guid documentId, Guid userId, string userRole, string ipAddress, string userAgent)
+    {
+        var document = await _context.Documents
+            .Include(d => d.User)
+            .FirstOrDefaultAsync(d => d.Id == documentId);
+
+        if (document == null)
+        {
+            throw new FileNotFoundException("Document not found");
+        }
+
+        // Проверяем права доступа - admin видит все, user только свои
+        if (userRole != "admin" && document.UserId != userId)
+        {
+            throw new UnauthorizedAccessException("Access denied");
+        }
+
+        // Увеличиваем счетчик скачиваний
+        document.DownloadCount++;
+        document.LastAccessedAt = DateTime.UtcNow;
+        
+        // Логируем активность
+        await _activityLogService.LogActivityAsync(userId, ActionTypes.Download, 
+            new { DocumentName = document.Filename }, ipAddress, userAgent, document.Id);
+
+        await _context.SaveChangesAsync();
+
+        // Читаем файл
+        var filePath = document.FilePath;
+        if (!File.Exists(filePath))
+        {
+            throw new FileNotFoundException("Physical file not found");
+        }
+
+        var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read);
+        return (fileStream, document.Filename, document.MimeType);
+    }
+
+    public async Task GenerateQRAsync(Guid documentId, Guid userId, string userRole, string ipAddress, string userAgent)
+    {
+        var document = await _context.Documents
+            .Include(d => d.User)
+            .FirstOrDefaultAsync(d => d.Id == documentId);
+
+        if (document == null)
+        {
+            throw new FileNotFoundException("Document not found");
+        }
+
+        // Проверяем права доступа
+        if (userRole != "admin" && document.UserId != userId)
+        {
+            throw new UnauthorizedAccessException("Access denied");
+        }
+
+        // Увеличиваем счетчик генерации QR
+        document.QrGenerationCount++;
+        
+        // Логируем активность
+        await _activityLogService.LogActivityAsync(userId, ActionTypes.QrGenerate, 
+            new { DocumentName = document.Filename }, ipAddress, userAgent, document.Id);
+
+        await _context.SaveChangesAsync();
+    }
+
+    public async Task<List<DocumentResponseDto>> SearchDocumentsAsync(string query, Guid userId, string userRole)
+    {
+        var searchQuery = _context.Documents.Include(d => d.User).AsQueryable();
+
+        // Фильтрация по правам доступа
+        if (userRole != "admin")
+        {
+            searchQuery = searchQuery.Where(d => d.UserId == userId);
+        }
+
+        // Сначала загружаем все документы пользователя
+        var allDocuments = await searchQuery
+            .OrderByDescending(d => d.CreatedAt)
+            .ToListAsync();
+
+        // Затем фильтруем в памяти, включая поиск по тегам
+        var documents = allDocuments.Where(d => 
+            d.Filename.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+            (d.OcrText != null && d.OcrText.Contains(query, StringComparison.OrdinalIgnoreCase)) ||
+            (d.Summary != null && d.Summary.Contains(query, StringComparison.OrdinalIgnoreCase)) ||
+            (d.Tags != null && d.Tags.Any(tag => tag.Contains(query, StringComparison.OrdinalIgnoreCase)))
+        ).ToList();
+
+        var result = new List<DocumentResponseDto>();
+        foreach (var doc in documents)
+        {
+            result.Add(await CreateDocumentResponseDto(doc));
+        }
+
+        return result;
+    }
+
     public async Task<bool> DeleteDocumentAsync(Guid documentId, Guid userId)
     {
         var document = await _context.Documents
@@ -195,30 +310,73 @@ public class DocumentService : IDocumentService
 
     private async Task ProcessDocumentAsync(Guid documentId)
     {
+        using var scope = _serviceScopeFactory.CreateScope();
+        var scopedContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var scopedOcrService = scope.ServiceProvider.GetRequiredService<IOcrService>();
+        var scopedGeminiService = scope.ServiceProvider.GetRequiredService<IGeminiService>();
+
         try
         {
-            var document = await _context.Documents.FindAsync(documentId);
+            var document = await scopedContext.Documents.FindAsync(documentId);
             if (document == null) return;
 
-            // Perform OCR
-            var ocrText = await _ocrService.ExtractTextAsync(document.FilePath);
+            _logger.LogInformation("Starting document processing for {DocumentId}", documentId);
+
+            // Extract OCR text from first page only for PDFs, full text for images
+            var ocrText = await scopedOcrService.ExtractTextFromFirstPageAsync(document.FilePath, document.MimeType);
             
             if (!string.IsNullOrEmpty(ocrText))
             {
-                // Get AI summary and tags
-                var (summary, tags) = await _geminiService.ProcessTextAsync(ocrText);
+                _logger.LogInformation("OCR completed for {DocumentId}, extracted {TextLength} characters", documentId, ocrText.Length);
                 
-                // Update document
+                // Get AI summary and tags from Gemini
+                var (summary, tags) = await scopedGeminiService.ProcessTextAsync(ocrText);
+                
+                _logger.LogInformation("AI processing completed for {DocumentId}, summary: {SummaryLength} chars, tags: {TagCount}", 
+                    documentId, summary?.Length ?? 0, tags?.Count ?? 0);
+                
+                // Update document with processing results
                 document.OcrText = ocrText;
                 document.Summary = summary;
-                document.Tags = tags;
+                document.Tags = tags ?? new List<string>();
+                document.UpdatedAt = DateTime.UtcNow;
                 
-                await _context.SaveChangesAsync();
+                await scopedContext.SaveChangesAsync();
+                
+                _logger.LogInformation("Document processing completed successfully for {DocumentId}", documentId);
+            }
+            else
+            {
+                _logger.LogWarning("OCR returned empty text for document {DocumentId}", documentId);
+                
+                // Mark as processed even if no text extracted
+                document.Summary = "Не удалось извлечь текст из документа";
+                document.Tags = new List<string> { "Обработка завершена", "Текст не найден" };
+                document.UpdatedAt = DateTime.UtcNow;
+                
+                await scopedContext.SaveChangesAsync();
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to process document {DocumentId}", documentId);
+            
+            // Mark document with error status
+            try
+            {
+                var document = await scopedContext.Documents.FindAsync(documentId);
+                if (document != null)
+                {
+                    document.Summary = "Ошибка при обработке документа";
+                    document.Tags = new List<string> { "Ошибка обработки" };
+                    document.UpdatedAt = DateTime.UtcNow;
+                    await scopedContext.SaveChangesAsync();
+                }
+            }
+            catch (Exception saveEx)
+            {
+                _logger.LogError(saveEx, "Failed to save error status for document {DocumentId}", documentId);
+            }
         }
     }
 }

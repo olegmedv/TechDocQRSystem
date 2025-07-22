@@ -65,6 +65,97 @@ public class DocumentsController : ControllerBase
         }
     }
 
+    [HttpGet]
+    [Authorize(Roles = "admin")]
+    public async Task<ActionResult<List<DocumentResponseDto>>> GetAllDocuments()
+    {
+        try
+        {
+            var documents = await _documentService.GetAllDocumentsAsync();
+            return Ok(documents);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get all documents");
+            return StatusCode(500, new { message = "Failed to retrieve documents" });
+        }
+    }
+
+    [HttpGet("{id}/download")]
+    public async Task<IActionResult> DownloadDocumentById(Guid id)
+    {
+        try
+        {
+            var userId = GetCurrentUserId();
+            var userRole = GetCurrentUserRole();
+            var ipAddress = GetClientIpAddress();
+            var userAgent = Request.Headers["User-Agent"].ToString();
+
+            var (fileStream, fileName, contentType) = await _documentService.DownloadDocumentByIdAsync(id, userId, userRole, ipAddress, userAgent);
+            
+            return File(fileStream, contentType, fileName);
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound(new { message = "Document not found" });
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Download failed for document {DocumentId}", id);
+            return StatusCode(500, new { message = "Download failed" });
+        }
+    }
+
+    [HttpPost("{id}/generate-qr")]
+    public async Task<IActionResult> GenerateQR(Guid id)
+    {
+        try
+        {
+            var userId = GetCurrentUserId();
+            var userRole = GetCurrentUserRole();
+            var ipAddress = GetClientIpAddress();
+            var userAgent = Request.Headers["User-Agent"].ToString();
+
+            await _documentService.GenerateQRAsync(id, userId, userRole, ipAddress, userAgent);
+            return Ok(new { message = "QR код сгенерирован" });
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error generating QR for document {DocumentId}", id);
+            return StatusCode(500, new { message = "Ошибка при генерации QR кода" });
+        }
+    }
+
+    [HttpGet("search")]
+    public async Task<ActionResult<List<DocumentResponseDto>>> SearchDocuments([FromQuery] string q)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(q))
+            {
+                return BadRequest(new { message = "Поисковый запрос не может быть пустым" });
+            }
+
+            var userId = GetCurrentUserId();
+            var userRole = GetCurrentUserRole();
+            var documents = await _documentService.SearchDocumentsAsync(q, userId, userRole);
+            return Ok(documents);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error searching documents with query: {Query}", q);
+            return StatusCode(500, new { message = "Ошибка при поиске документов" });
+        }
+    }
+
     [HttpGet("{id}")]
     public async Task<ActionResult<DocumentResponseDto>> GetDocument(Guid id)
     {
@@ -167,5 +258,10 @@ public class DocumentsController : ControllerBase
             return userId;
         }
         return null;
+    }
+
+    private string GetCurrentUserRole()
+    {
+        return User.FindFirst(ClaimTypes.Role)?.Value ?? "user";
     }
 }

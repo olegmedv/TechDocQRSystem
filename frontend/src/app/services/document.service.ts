@@ -2,22 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../environments/environment';
-
-export interface Document {
-  id: string;
-  filename: string;
-  fileSize: number;
-  mimeType: string;
-  summary?: string;
-  tags: string[];
-  downloadUrl: string;
-  qrCode: string;
-  createdAt: string;
-  updatedAt: string;
-  downloadCount: number;
-  qrGenerationCount: number;
-  lastAccessedAt?: string;
-}
+import { Document } from '../models/document.models';
 
 export interface UploadResponse {
   message: string;

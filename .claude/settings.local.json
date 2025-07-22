@@ -10,7 +10,8 @@
       "Bash(npm install:*)",
       "Bash(rm:*)",
       "Bash(dotnet ef migrations:*)",
-      "Bash(touch:*)"
+      "Bash(touch:*)",
+      "Bash(dotnet build)"
     ],
     "deny": []
   }

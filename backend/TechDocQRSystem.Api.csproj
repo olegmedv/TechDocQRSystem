@@ -21,6 +21,9 @@
     <PackageReference Include="MailKit" Version="4.3.0" />
     <PackageReference Include="Google.Cloud.AIPlatform.V1" Version="3.0.0" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.0" />
+    <PackageReference Include="itext7.pdfhtml" Version="5.0.0" />
+    <PackageReference Include="itext7" Version="8.0.0" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.0.2" />
   </ItemGroup>
 
 </Project>

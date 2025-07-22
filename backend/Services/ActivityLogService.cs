@@ -81,25 +81,16 @@ public class ActivityLogService : IActivityLogService
             .OrderByDescending(al => al.CreatedAt)
             .Skip((filter.Page - 1) * filter.PageSize)
             .Take(filter.PageSize)
-            .Select(al => new 
-            {
-                Id = al.Id,
-                ActionType = al.ActionType,
-                DocumentName = al.Document != null ? al.Document.Filename : null,
-                Username = al.User.Username,
-                CreatedAt = al.CreatedAt,
-                DetailsJson = al.Details != null ? al.Details.RootElement.GetRawText() : null
-            })
             .ToListAsync();
 
-        var logs = rawLogs.Select(rl => new ActivityLogDto
+        var logs = rawLogs.Select(al => new ActivityLogDto
         {
-            Id = rl.Id,
-            ActionType = rl.ActionType,
-            DocumentName = rl.DocumentName,
-            Username = rl.Username,
-            CreatedAt = rl.CreatedAt,
-            Details = rl.DetailsJson != null ? JsonSerializer.Deserialize<object>(rl.DetailsJson) : null
+            Id = al.Id,
+            ActionType = al.ActionType,
+            DocumentName = al.Document?.Filename,
+            Username = al.User.Username,
+            CreatedAt = al.CreatedAt,
+            Details = al.Details != null ? JsonSerializer.Deserialize<object>(al.Details.RootElement.GetRawText()) : null
         }).ToList();
 
         return (logs, totalCount);

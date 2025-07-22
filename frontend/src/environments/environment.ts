@@ -1,4 +1,5 @@
 export const environment = {
   production: false,
-  apiUrl: 'https://qualify-ab-compound-legendary.trycloudflare.com'
+  apiUrl: 'https://injury-playback-whale-adam.trycloudflare.com'
 };
+

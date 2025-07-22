@@ -12,20 +12,8 @@ import { NzQRCodeModule } from 'ng-zorro-antd/qr-code';
 import { NzDividerModule } from 'ng-zorro-antd/divider';
 import { NzSpinModule } from 'ng-zorro-antd/spin';
 import { DocumentService } from '../../services/document.service';
+import { Document } from '../../models/document.models';
 import { AuthService } from '../../services/auth.service';
-
-interface UploadedDocument {
-  id: string;
-  filename: string;
-  fileSize: number;
-  summary?: string;
-  tags: string[];
-  downloadUrl: string;
-  qrCode: string;
-  createdAt: string;
-  downloadCount: number;
-  qrGenerationCount: number;
-}
 
 @Component({
   selector: 'app-upload',
@@ -104,7 +92,7 @@ interface UploadedDocument {
               <nz-tag *ngFor="let tag of doc.tags" nzColor="blue">{{ tag }}</nz-tag>
             </td>
             <td>
-              <nz-qrcode [nzValue]="doc.downloadUrl" [nzSize]="80"></nz-qrcode>
+              <nz-qrcode [nzValue]="doc.accessLink" [nzSize]="80"></nz-qrcode>
             </td>
             <td>
               <div class="stats">
@@ -193,7 +181,7 @@ interface UploadedDocument {
   `]
 })
 export class UploadComponent implements OnInit {
-  documents: UploadedDocument[] = [];
+  documents: Document[] = [];
   loading = false;
   uploading = false;
   fileList: any[] = [];
