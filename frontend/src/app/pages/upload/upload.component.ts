@@ -16,6 +16,7 @@ import { Document } from '../../models/document.models';
 import { AuthService } from '../../services/auth.service';
 import { SignalRService, DocumentProcessingNotification } from '../../services/signalr.service';
 import { Subscription } from 'rxjs';
+import { environment } from '../../../environments/environment';
 
 @Component({
   selector: 'app-upload',
@@ -37,6 +38,11 @@ import { Subscription } from 'rxjs';
     <div class="page-header">
       <h1>Загрузка документов</h1>
       <p>Загружайте изображения документов для обработки OCR и анализа ИИ</p>
+      <div style="display: flex; gap: 8px; margin-top: 8px;">
+        <button nz-button nzType="dashed" (click)="testSignalR()">🧪 Тест SignalR</button>
+        <button nz-button nzType="default" (click)="reconnectSignalR()">🔄 Переподключить SignalR</button>
+        <button nz-button nzType="default" (click)="checkSignalRStatus()">📊 Статус SignalR</button>
+      </div>
     </div>
 
     <nz-card nzTitle="Загрузить документ" class="upload-card">
@@ -72,6 +78,7 @@ import { Subscription } from 'rxjs';
         <thead>
           <tr>
             <th>Файл</th>
+            <th>Пользователь</th>
             <th>Размер</th>
             <th>Краткое описание</th>
             <th>Теги</th>
@@ -84,6 +91,12 @@ import { Subscription } from 'rxjs';
         <tbody>
           <tr *ngFor="let doc of documentsTable.data">
             <td>{{ doc.filename }}</td>
+            <td>
+              <div class="user-cell">
+                {{ doc.user?.username || 'Неизвестный' }}
+                <div style="font-size: 11px; color: #999;">{{ doc.user?.email }}</div>
+              </div>
+            </td>
             <td>{{ formatFileSize(doc.fileSize) }}</td>
             <td>
               <div class="summary-cell">
@@ -158,6 +171,10 @@ import { Subscription } from 'rxjs';
       white-space: nowrap;
     }
 
+    .user-cell {
+      max-width: 120px;
+    }
+
     .stats div {
       font-size: 12px;
       color: #666;
@@ -199,6 +216,22 @@ export class UploadComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.loadDocuments();
     this.subscribeToSignalR();
+    
+    // Force SignalR connection attempt after component init
+    setTimeout(() => {
+      const connectionState = this.signalRService.getConnectionState();
+      console.log('🔌 Initial SignalR Connection State:', connectionState);
+      if (connectionState === 'Disconnected' || connectionState == null) {
+        console.log('🔄 SignalR not connected, attempting to start...');
+        this.signalRService.startConnection();
+      }
+    }, 2000);
+    
+    // Check SignalR connection status periodically
+    setInterval(() => {
+      const connectionState = this.signalRService.getConnectionState();
+      console.log('🔌 SignalR Connection State:', connectionState);
+    }, 10000); // Every 10 seconds
   }
 
   ngOnDestroy(): void {
@@ -208,9 +241,11 @@ export class UploadComponent implements OnInit, OnDestroy {
   }
 
   private subscribeToSignalR(): void {
+    console.log('🎧 UploadComponent: Subscribing to SignalR updates');
     this.signalRSubscription = this.signalRService.documentUpdates$.subscribe(
       (notification: DocumentProcessingNotification | null) => {
         if (notification) {
+          console.log('🔔 UploadComponent: Received SignalR notification:', notification);
           this.handleDocumentUpdate(notification);
         }
       }
@@ -218,21 +253,31 @@ export class UploadComponent implements OnInit, OnDestroy {
   }
 
   private handleDocumentUpdate(notification: DocumentProcessingNotification): void {
+    console.log('🔄 UploadComponent: Handling document update for ID:', notification.documentId);
+    
     // Find and update the document in the list
     const documentIndex = this.documents.findIndex(doc => doc.id === notification.documentId);
+    console.log('🔍 UploadComponent: Document index found:', documentIndex, 'out of', this.documents.length, 'documents');
+    
     if (documentIndex !== -1) {
       const document = this.documents[documentIndex];
+      console.log('📄 UploadComponent: Updating document:', document.filename);
       
       if (notification.status === 'completed') {
         document.summary = notification.summary || document.summary;
         document.tags = notification.tags || document.tags;
+        console.log('✅ UploadComponent: Document processing completed - Summary:', document.summary?.substring(0, 50), 'Tags:', document.tags);
       } else if (notification.status === 'failed') {
         document.summary = 'Ошибка обработки: ' + (notification.error || 'Неизвестная ошибка');
         document.tags = ['Ошибка'];
+        console.log('❌ UploadComponent: Document processing failed:', document.summary);
       }
       
       // Trigger change detection
       this.documents = [...this.documents];
+      console.log('🔄 UploadComponent: Document list updated, triggering change detection');
+    } else {
+      console.warn('⚠️ UploadComponent: Document not found in list for ID:', notification.documentId);
     }
   }
 
@@ -344,5 +389,64 @@ export class UploadComponent implements OnInit, OnDestroy {
       hour: '2-digit',
       minute: '2-digit'
     });
+  }
+
+  testSignalR(): void {
+    console.log('🧪 Testing SignalR connection...');
+    const connectionState = this.signalRService.getConnectionState();
+    console.log('🔌 Current SignalR state:', connectionState);
+    
+    // If disconnected, try to connect first
+    if (connectionState !== 'Connected') {
+      console.log('🔗 SignalR not connected, attempting connection first...');
+      this.signalRService.forceReconnect();
+      
+      // Wait a bit and try again
+      setTimeout(() => {
+        this.executeSignalRTest();
+      }, 3000);
+    } else {
+      this.executeSignalRTest();
+    }
+  }
+
+  private executeSignalRTest(): void {
+    this.documentService.testSignalR().subscribe({
+      next: (response) => {
+        console.log('✅ SignalR test response:', response);
+        this.message.success('SignalR тест запущен! Проверьте консоль и уведомления.');
+      },
+      error: (error) => {
+        console.error('❌ SignalR test failed:', error);
+        this.message.error('Ошибка теста SignalR');
+      }
+    });
+  }
+
+  reconnectSignalR(): void {
+    console.log('🔄 Reconnecting SignalR...');
+    console.log('🔍 Before reconnect - localStorage check:');
+    console.log('- authToken:', localStorage.getItem('authToken')?.substring(0, 50) + '...');
+    console.log('- Environment API URL:', environment.apiUrl);
+    
+    this.signalRService.stopConnection();
+    setTimeout(() => {
+      console.log('🚀 Starting SignalR connection manually...');
+      this.signalRService.startConnection();
+    }, 1000);
+    this.message.info('SignalR переподключается...');
+  }
+
+  checkSignalRStatus(): void {
+    const connectionState = this.signalRService.getConnectionState();
+    const token = localStorage.getItem('authToken');
+    
+    console.log('📊 SignalR Status Check:');
+    console.log('- Connection State:', connectionState);
+    console.log('- Has Auth Token:', !!token);
+    console.log('- Token Preview:', token ? token.substring(0, 50) + '...' : 'None');
+    console.log('- localStorage keys:', Object.keys(localStorage));
+    
+    this.message.info(`SignalR: ${connectionState}, Token: ${token ? 'Present' : 'Missing'}`);
   }
 }

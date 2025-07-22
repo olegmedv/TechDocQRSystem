@@ -41,25 +41,63 @@ public class TesseractOcrService : IOcrService
             {
                 try
                 {
-                    using var engine = new TesseractEngine(@"./tessdata", "rus+eng", EngineMode.Default);
+                    // Try different tessdata paths
+                    var tessdataPaths = new[]
+                    {
+                        Environment.GetEnvironmentVariable("TESSDATA_PREFIX"),
+                        @"C:\Program Files\Tesseract-OCR\tessdata",
+                        @"C:\tools\tesseract\tessdata",
+                        @"./tessdata",
+                        @"tessdata",
+                        @"../tessdata"
+                    };
+
+                    TesseractEngine? engine = null;
+                    string workingPath = "";
                     
-                    // Set additional parameters for better Russian recognition
-                    engine.SetVariable("preserve_interword_spaces", "1");
-                    engine.SetVariable("user_defined_dpi", "300");
-                    engine.SetVariable("tessedit_char_whitelist", "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюяABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:!?()[]{}\"'-+=/\\|@#$%^&*<> \n\t");
-                    
-                    using var img = Pix.LoadFromFile(filePath);
-                    using var page = engine.Process(img);
-                    
-                    var text = page.GetText();
-                    var confidence = page.GetMeanConfidence();
-                    
-                    _logger.LogInformation("OCR completed for {FilePath} with confidence {Confidence:F2}%, extracted {TextLength} characters", 
-                        filePath, confidence, text?.Length ?? 0);
-                    _logger.LogInformation("OCR text preview (first 200 chars): {TextPreview}", 
-                        text?.Length > 200 ? text.Substring(0, 200) + "..." : text);
-                    
-                    return text?.Trim() ?? string.Empty;
+                    foreach (var path in tessdataPaths)
+                    {
+                        if (string.IsNullOrEmpty(path)) continue;
+                        
+                        try
+                        {
+                            _logger.LogInformation("Trying Tesseract path: {Path}", path);
+                            engine = new TesseractEngine(path, "eng", EngineMode.Default);
+                            workingPath = path;
+                            _logger.LogInformation("✅ Tesseract initialized successfully with path: {Path}", path);
+                            break;
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning("❌ Failed to initialize Tesseract with path {Path}: {Error}", path, ex.Message);
+                            continue;
+                        }
+                    }
+
+                    if (engine == null)
+                    {
+                        throw new InvalidOperationException("Could not initialize Tesseract engine with any available paths");
+                    }
+
+                    using (engine)
+                    {
+                        // Set additional parameters for better recognition
+                        engine.SetVariable("preserve_interword_spaces", "1");
+                        engine.SetVariable("user_defined_dpi", "300");
+                        
+                        using var img = Pix.LoadFromFile(filePath);
+                        using var page = engine.Process(img);
+                        
+                        var text = page.GetText();
+                        var confidence = page.GetMeanConfidence();
+                        
+                        _logger.LogInformation("OCR completed for {FilePath} with confidence {Confidence:F2}%, extracted {TextLength} characters", 
+                            filePath, confidence, text?.Length ?? 0);
+                        _logger.LogInformation("OCR text preview (first 200 chars): {TextPreview}", 
+                            text?.Length > 200 ? text.Substring(0, 200) + "..." : text);
+                        
+                        return text?.Trim() ?? string.Empty;
+                    }
                 }
                 catch (Exception ex)
                 {

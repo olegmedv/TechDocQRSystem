@@ -55,4 +55,8 @@ export class DocumentService {
   deleteDocument(id: string): Observable<any> {
     return this.http.delete(`${this.apiUrl}/${id}`);
   }
+
+  testSignalR(): Observable<any> {
+    return this.http.post(`${this.apiUrl}/test-signalr`, {});
+  }
 }

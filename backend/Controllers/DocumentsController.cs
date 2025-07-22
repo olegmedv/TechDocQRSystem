@@ -14,14 +14,17 @@ public class DocumentsController : ControllerBase
     private readonly IDocumentService _documentService;
     private readonly IActivityLogService _activityLogService;
     private readonly ILogger<DocumentsController> _logger;
+    private readonly IDocumentNotificationService _notificationService;
 
     public DocumentsController(IDocumentService documentService, 
                               IActivityLogService activityLogService,
-                              ILogger<DocumentsController> logger)
+                              ILogger<DocumentsController> logger,
+                              IDocumentNotificationService notificationService)
     {
         _documentService = documentService;
         _activityLogService = activityLogService;
         _logger = logger;
+        _notificationService = notificationService;
     }
 
     [HttpPost("upload")]
@@ -54,7 +57,20 @@ public class DocumentsController : ControllerBase
         try
         {
             var userId = GetCurrentUserId();
-            var documents = await _documentService.GetUserDocumentsAsync(userId);
+            var userRole = GetCurrentUserRole();
+            
+            // Admin can see all documents, users only their own
+            List<DocumentResponseDto> documents;
+            if (userRole == "admin")
+            {
+                documents = await _documentService.GetAllDocumentsAsync();
+                _logger.LogInformation("Admin user {UserId} retrieved all documents", userId);
+            }
+            else
+            {
+                documents = await _documentService.GetUserDocumentsAsync(userId);
+                _logger.LogInformation("User {UserId} retrieved their own documents", userId);
+            }
             
             return Ok(documents);
         }
@@ -183,7 +199,6 @@ public class DocumentsController : ControllerBase
     }
 
     [HttpGet("download/{accessToken}")]
-    [AllowAnonymous]
     public async Task<IActionResult> DownloadDocument(Guid accessToken)
     {
         try
@@ -263,5 +278,32 @@ public class DocumentsController : ControllerBase
     private string GetCurrentUserRole()
     {
         return User.FindFirst(ClaimTypes.Role)?.Value ?? "user";
+    }
+
+    [HttpPost("test-signalr")]
+    public async Task<ActionResult> TestSignalR()
+    {
+        try
+        {
+            var userId = GetCurrentUserId();
+            var testDocumentId = Guid.NewGuid();
+            
+            _logger.LogInformation("🧪 Testing SignalR notification for user {UserId}", userId);
+            
+            await _notificationService.NotifyDocumentProcessingCompleted(
+                userId, 
+                testDocumentId, 
+                "test-document.pdf", 
+                "Тестовое уведомление от SignalR", 
+                new List<string> { "Тест", "SignalR" }
+            );
+            
+            return Ok(new { message = "SignalR test notification sent", userId, testDocumentId });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "SignalR test failed");
+            return StatusCode(500, new { message = ex.Message });
+        }
     }
 }

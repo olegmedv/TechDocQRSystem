@@ -50,6 +50,14 @@ public class DocumentResponseDto
     public int DownloadCount { get; set; }
     public int QrGenerationCount { get; set; }
     public DateTime? LastAccessedAt { get; set; }
+    public DocumentUserDto? User { get; set; }
+}
+
+public class DocumentUserDto
+{
+    public Guid Id { get; set; }
+    public string Username { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
 }
 
 public class DocumentUploadDto

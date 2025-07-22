@@ -72,7 +72,8 @@ public class AuthController : ControllerBase
             return Ok(new { 
                 message = "Login successful",
                 user = result.User,
-                expiresAt = result.ExpiresAt 
+                expiresAt = result.ExpiresAt,
+                token = result.Token  // Add token for SignalR
             });
         }
         catch (UnauthorizedAccessException ex)

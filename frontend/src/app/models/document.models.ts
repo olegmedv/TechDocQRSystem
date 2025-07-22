@@ -11,6 +11,11 @@ export interface Document {
   downloadCount: number;
   qrGenerationCount: number;
   lastAccessedAt?: string;
+  user?: {
+    id: string;
+    username: string;
+    email: string;
+  };
 }
 
 export interface SearchRequest {

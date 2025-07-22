@@ -31,9 +31,13 @@ export class AuthService {
     }).pipe(
       tap(response => {
         console.log('🔐 AuthService: login SUCCESS:', response);
+        console.log('🔑 AuthService: Token in response:', response.token ? 'Present' : 'Missing');
         this.setAuthState(response.user, response.expiresAt, response.token);
         // Start SignalR connection after successful login
-        setTimeout(() => this.signalRService.startConnection(), 100);
+        setTimeout(() => {
+          console.log('🔗 AuthService: Starting SignalR connection after login...');
+          this.signalRService.startConnection();
+        }, 500); // Увеличил задержку
       }),
       catchError(error => {
         console.error('🔐 AuthService: login ERROR:', error);
@@ -132,7 +136,10 @@ export class AuthService {
             this.scheduleTokenRefresh(expiresAt);
             this.authCheckCompleted.next(true);
             // Start SignalR connection for restored sessions
-            setTimeout(() => this.signalRService.startConnection(), 100);
+            setTimeout(() => {
+              console.log('🔗 AuthService: Starting SignalR connection for restored session...');
+              this.signalRService.startConnection();
+            }, 500);
           },
           error: (error) => {
             console.log('🔐 AuthService: Server validation FAILED:', error);

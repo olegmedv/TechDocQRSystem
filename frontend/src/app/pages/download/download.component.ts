@@ -60,6 +60,7 @@ import { Subscription } from 'rxjs';
           <tr>
             <th nzWidth="50px"></th>
             <th>Файл</th>
+            <th>Пользователь</th>
             <th>Размер</th>
             <th>Краткое описание</th>
             <th>Теги</th>
@@ -79,6 +80,12 @@ import { Subscription } from 'rxjs';
               <div class="file-info">
                 <i nz-icon nzType="file-text"></i>
                 <span class="filename">{{ doc.filename }}</span>
+              </div>
+            </td>
+            <td>
+              <div class="user-cell">
+                {{ doc.user?.username || 'Неизвестный' }}
+                <div style="font-size: 11px; color: #999;">{{ doc.user?.email }}</div>
               </div>
             </td>
             <td>{{ formatFileSize(doc.fileSize) }}</td>
@@ -184,6 +191,10 @@ import { Subscription } from 'rxjs';
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+
+    .user-cell {
+      max-width: 120px;
     }
 
     .no-tags {

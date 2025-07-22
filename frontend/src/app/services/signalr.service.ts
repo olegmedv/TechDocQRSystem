@@ -27,81 +27,136 @@ export class SignalRService {
 
   public startConnection(): void {
     if (this.hubConnection?.state === signalR.HubConnectionState.Connected) {
+      console.log('🔌 SignalR: Connection already established');
       return;
     }
 
     const token = localStorage.getItem('authToken');
+    console.log('🔍 SignalR: All localStorage items:', {
+      authToken: localStorage.getItem('authToken')?.substring(0, 50) + '...',
+      currentUser: localStorage.getItem('currentUser'),
+      expiresAt: localStorage.getItem('expiresAt')
+    });
+    
     if (!token) {
-      console.warn('No auth token found, cannot connect to SignalR hub');
+      console.warn('⚠️ SignalR: No auth token found, cannot connect to SignalR hub');
+      console.warn('⚠️ SignalR: Available localStorage keys:', Object.keys(localStorage));
       return;
     }
 
+    console.log('🔌 SignalR: Starting connection with token:', token.substring(0, 50) + '...');
+    
+    const signalrUrl = `${environment.apiUrl}/documentHub?access_token=${token}`;
+    console.log('🔗 SignalR: Connection URL:', signalrUrl);
+
     this.hubConnection = new signalR.HubConnectionBuilder()
-      .withUrl(`${environment.apiUrl}/documentHub?access_token=${token}`, {
+      .withUrl(signalrUrl, {
         withCredentials: true
       })
       .withAutomaticReconnect([0, 2000, 10000, 30000])
+      .configureLogging(signalR.LogLevel.Information)
       .build();
 
     this.hubConnection
       .start()
       .then(() => {
-        console.log('SignalR connection established');
+        console.log('✅ SignalR: Connection established successfully');
+        console.log('🔌 SignalR: Connection state:', this.hubConnection?.state);
         this.joinUserGroup();
         this.registerEventHandlers();
       })
       .catch(err => {
-        console.error('Error starting SignalR connection:', err);
+        console.error('❌ SignalR: Error starting connection:', err);
+        console.error('❌ SignalR: Error details:', {
+          message: err.message,
+          status: err.status,
+          url: err.url,
+          name: err.name
+        });
+        if (err.message?.includes('401') || err.message?.includes('Unauthorized')) {
+          console.error('🔑 SignalR: Authentication failed - token might be invalid');
+        }
+        if (err.message?.includes('CORS') || err.message?.includes('cors')) {
+          console.error('🌐 SignalR: CORS error - check server CORS configuration');
+        }
       });
 
     this.hubConnection.onreconnected(() => {
-      console.log('SignalR reconnected');
+      console.log('🔄 SignalR: Reconnected successfully');
       this.joinUserGroup();
     });
 
     this.hubConnection.onclose(() => {
-      console.log('SignalR connection closed');
+      console.log('🔌 SignalR: Connection closed');
+    });
+
+    this.hubConnection.onreconnecting(() => {
+      console.log('🔄 SignalR: Attempting to reconnect...');
     });
   }
 
   public stopConnection(): void {
     if (this.hubConnection) {
+      console.log('🔌 SignalR: Stopping connection...');
       this.hubConnection.stop();
       this.hubConnection = null;
     }
   }
 
+  public forceReconnect(): void {
+    console.log('🔄 SignalR: Force reconnecting...');
+    this.stopConnection();
+    setTimeout(() => {
+      this.startConnection();
+    }, 1000);
+  }
+
   private joinUserGroup(): void {
     if (this.hubConnection?.state === signalR.HubConnectionState.Connected) {
-      this.hubConnection.invoke('JoinUserGroup').catch(err => {
-        console.error('Error joining user group:', err);
-      });
+      console.log('🔗 SignalR: Joining user group...');
+      this.hubConnection.invoke('JoinUserGroup')
+        .then(() => {
+          console.log('✅ SignalR: Successfully joined user group');
+        })
+        .catch(err => {
+          console.error('❌ SignalR: Error joining user group:', err);
+        });
+    } else {
+      console.warn('⚠️ SignalR: Cannot join user group - connection not established');
     }
   }
 
   private registerEventHandlers(): void {
-    if (!this.hubConnection) return;
+    if (!this.hubConnection) {
+      console.warn('⚠️ SignalR: Cannot register event handlers - no connection');
+      return;
+    }
+
+    console.log('🎧 SignalR: Registering event handlers...');
 
     // Handle document processing started
     this.hubConnection.on('DocumentProcessingStarted', (data: DocumentProcessingNotification) => {
-      console.log('Document processing started:', data);
+      console.log('🔔 SignalR: Received DocumentProcessingStarted:', data);
       this.message.info(`Началась обработка документа: ${data.filename}`);
       this.documentUpdatesSubject.next(data);
     });
 
     // Handle document processing completed
     this.hubConnection.on('DocumentProcessingCompleted', (data: DocumentProcessingNotification) => {
-      console.log('Document processing completed:', data);
+      console.log('🔔 SignalR: Received DocumentProcessingCompleted:', data);
+      console.log('📄 Document data - Summary:', data.summary?.substring(0, 100), 'Tags:', data.tags);
       this.message.success(`Документ обработан: ${data.filename}`);
       this.documentUpdatesSubject.next(data);
     });
 
     // Handle document processing failed
     this.hubConnection.on('DocumentProcessingFailed', (data: DocumentProcessingNotification) => {
-      console.log('Document processing failed:', data);
+      console.log('🔔 SignalR: Received DocumentProcessingFailed:', data);
       this.message.error(`Ошибка обработки документа: ${data.filename}`);
       this.documentUpdatesSubject.next(data);
     });
+
+    console.log('✅ SignalR: Event handlers registered successfully');
   }
 
   public getConnectionState(): signalR.HubConnectionState | null {

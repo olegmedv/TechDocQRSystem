@@ -85,7 +85,9 @@ public class DocumentService : IDocumentService
             new { FileName = file.FileName, FileSize = file.Length }, ipAddress, userAgent, document.Id);
 
         // Notify that processing started
+        _logger.LogInformation("📤 Starting to notify about document processing for user {UserId}, document {DocumentId}", userId, document.Id);
         await _notificationService.NotifyDocumentProcessingStarted(userId, document.Id, file.FileName);
+        _logger.LogInformation("📤 Finished notifying about document processing start for user {UserId}, document {DocumentId}", userId, document.Id);
 
         // Process document asynchronously (OCR + AI) with notifications
         _ = Task.Run(async () => await ProcessDocumentAsync(document.Id, userId));
@@ -127,6 +129,7 @@ public class DocumentService : IDocumentService
     public async Task<List<DocumentResponseDto>> GetUserDocumentsAsync(Guid userId)
     {
         var documents = await _context.Documents
+            .Include(d => d.User)
             .Where(d => d.UserId == userId)
             .OrderByDescending(d => d.CreatedAt)
             .ToListAsync();
@@ -310,7 +313,13 @@ public class DocumentService : IDocumentService
             CreatedAt = document.CreatedAt,
             DownloadCount = document.DownloadCount,
             QrGenerationCount = document.QrGenerationCount,
-            LastAccessedAt = document.LastAccessedAt
+            LastAccessedAt = document.LastAccessedAt,
+            User = document.User != null ? new DocumentUserDto
+            {
+                Id = document.User.Id,
+                Username = document.User.Username,
+                Email = document.User.Email
+            } : null
         };
     }
 
