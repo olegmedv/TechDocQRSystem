@@ -23,6 +23,7 @@
     "@angular/service-worker": "^17.0.0",
     "@ant-design/icons-angular": "^17.0.0",
     "@ctrl/tinycolor": "^4.1.0",
+    "@microsoft/signalr": "^8.0.7",
     "@types/qrcode": "^1.5.5",
     "ng-zorro-antd": "^17.0.0",
     "qrcode": "^1.5.3",

@@ -4,6 +4,7 @@ import { BehaviorSubject, Observable, tap, catchError, throwError } from 'rxjs';
 import { Router } from '@angular/router';
 import { environment } from '../../environments/environment';
 import { User, LoginRequest, RegisterRequest, AuthResponse } from '../models/auth.models';
+import { SignalRService } from './signalr.service';
 
 @Injectable({
   providedIn: 'root'
@@ -18,7 +19,7 @@ export class AuthService {
   public isAuthenticated$ = this.isAuthenticatedSubject.asObservable();
   public authCheckCompleted$ = this.authCheckCompleted.asObservable();
 
-  constructor(private http: HttpClient, private router: Router) {
+  constructor(private http: HttpClient, private router: Router, private signalRService: SignalRService) {
     console.log('🔐 AuthService: Constructor called');
     this.checkAuthStatus();
   }
@@ -31,6 +32,8 @@ export class AuthService {
       tap(response => {
         console.log('🔐 AuthService: login SUCCESS:', response);
         this.setAuthState(response.user, response.expiresAt, response.token);
+        // Start SignalR connection after successful login
+        setTimeout(() => this.signalRService.startConnection(), 100);
       }),
       catchError(error => {
         console.error('🔐 AuthService: login ERROR:', error);
@@ -128,6 +131,8 @@ export class AuthService {
             this.isAuthenticatedSubject.next(true);
             this.scheduleTokenRefresh(expiresAt);
             this.authCheckCompleted.next(true);
+            // Start SignalR connection for restored sessions
+            setTimeout(() => this.signalRService.startConnection(), 100);
           },
           error: (error) => {
             console.log('🔐 AuthService: Server validation FAILED:', error);
@@ -156,9 +161,12 @@ export class AuthService {
     this.isAuthenticatedSubject.next(true);
     
     // Сохраняем данные в localStorage для восстановления после перезагрузки
-    // Токен не сохраняем, так как он в HTTP-only cookie
     localStorage.setItem('currentUser', JSON.stringify(user));
     localStorage.setItem('expiresAt', expiresAt);
+    // Save token for SignalR connection
+    if (token) {
+      localStorage.setItem('authToken', token);
+    }
     console.log('🔐 AuthService: Data saved to localStorage');
     
     this.scheduleTokenRefresh(expiresAt);
@@ -169,9 +177,13 @@ export class AuthService {
     this.currentUserSubject.next(null);
     this.isAuthenticatedSubject.next(false);
     
+    // Stop SignalR connection
+    this.signalRService.stopConnection();
+    
     // Очищаем localStorage
     localStorage.removeItem('currentUser');
     localStorage.removeItem('expiresAt');
+    localStorage.removeItem('authToken');
     console.log('🔐 AuthService: localStorage cleared');
     
     if (this.tokenExpiryTimer) {

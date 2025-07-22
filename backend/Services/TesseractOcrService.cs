@@ -2,6 +2,10 @@ using Tesseract;
 using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Canvas.Parser;
 using iText.Kernel.Pdf.Canvas.Parser.Listener;
+using Docnet.Core;
+using Docnet.Core.Models;
+using System.Drawing;
+using System.Drawing.Imaging;
 
 namespace TechDocQRSystem.Api.Services;
 
@@ -37,15 +41,23 @@ public class TesseractOcrService : IOcrService
             {
                 try
                 {
-                    using var engine = new TesseractEngine(@"./tessdata", "eng+rus", EngineMode.Default);
+                    using var engine = new TesseractEngine(@"./tessdata", "rus+eng", EngineMode.Default);
+                    
+                    // Set additional parameters for better Russian recognition
+                    engine.SetVariable("preserve_interword_spaces", "1");
+                    engine.SetVariable("user_defined_dpi", "300");
+                    engine.SetVariable("tessedit_char_whitelist", "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюяABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:!?()[]{}\"'-+=/\\|@#$%^&*<> \n\t");
+                    
                     using var img = Pix.LoadFromFile(filePath);
                     using var page = engine.Process(img);
                     
                     var text = page.GetText();
                     var confidence = page.GetMeanConfidence();
                     
-                    _logger.LogInformation("OCR completed for {FilePath} with confidence {Confidence}", 
-                        filePath, confidence);
+                    _logger.LogInformation("OCR completed for {FilePath} with confidence {Confidence:F2}%, extracted {TextLength} characters", 
+                        filePath, confidence, text?.Length ?? 0);
+                    _logger.LogInformation("OCR text preview (first 200 chars): {TextPreview}", 
+                        text?.Length > 200 ? text.Substring(0, 200) + "..." : text);
                     
                     return text?.Trim() ?? string.Empty;
                 }
@@ -72,18 +84,42 @@ public class TesseractOcrService : IOcrService
                 throw new FileNotFoundException($"File not found: {filePath}");
             }
 
-            // For PDF files, extract text directly (no OCR needed for text-based PDFs)
+            // For PDF files, try direct text extraction first, then OCR if needed
             if (mimeType.ToLowerInvariant() == "application/pdf")
             {
-                var text = await ExtractTextFromPdfAsync(filePath);
-                if (!string.IsNullOrEmpty(text))
+                // First try direct text extraction
+                var directText = await ExtractTextFromPdfAsync(filePath);
+                if (!string.IsNullOrEmpty(directText.Trim()))
                 {
-                    return text;
+                    _logger.LogInformation("Successfully extracted text directly from PDF: {TextLength} chars", directText.Length);
+                    return directText;
+                }
+                
+                // If no text found, try OCR on first page image
+                _logger.LogInformation("No direct text found in PDF, attempting OCR conversion");
+                var tempImagePath = await ConvertPdfFirstPageToImageAsync(filePath);
+                if (!string.IsNullOrEmpty(tempImagePath))
+                {
+                    try
+                    {
+                        var ocrText = await ExtractTextAsync(tempImagePath);
+                        _logger.LogInformation("OCR from PDF image extracted {TextLength} chars", ocrText?.Length ?? 0);
+                        return ocrText;
+                    }
+                    finally
+                    {
+                        // Clean up temp file
+                        if (File.Exists(tempImagePath))
+                        {
+                            _logger.LogInformation("Cleaning up temp image: {TempPath}", tempImagePath);
+                            File.Delete(tempImagePath);
+                        }
+                    }
                 }
                 else
                 {
-                    _logger.LogWarning("No text found in PDF: {FilePath}", filePath);
-                    return "PDF не содержит распознаваемого текста";
+                    _logger.LogWarning("Failed to convert PDF to image for OCR: {FilePath}", filePath);
+                    return "Не удалось обработать PDF файл";
                 }
             }
             else if (IsImageFile(mimeType))
@@ -133,6 +169,55 @@ public class TesseractOcrService : IOcrService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "PDF text extraction failed: {PdfPath}", pdfPath);
+                return string.Empty;
+            }
+        });
+    }
+
+    private async Task<string> ConvertPdfFirstPageToImageAsync(string pdfPath)
+    {
+        return await Task.Run(() =>
+        {
+            try
+            {
+                _logger.LogInformation("Converting PDF first page to image for OCR: {PdfPath}", pdfPath);
+                
+                using var docReader = DocLib.Instance.GetDocReader(pdfPath, new PageDimensions(300, 300));
+                
+                if (docReader.GetPageCount() == 0)
+                {
+                    _logger.LogWarning("PDF has no pages: {PdfPath}", pdfPath);
+                    return string.Empty;
+                }
+
+                using var pageReader = docReader.GetPageReader(0); // First page
+                var rawBytes = pageReader.GetImage();
+                var width = pageReader.GetPageWidth();
+                var height = pageReader.GetPageHeight();
+                
+                // Create bitmap from raw bytes
+                var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+                var rect = new System.Drawing.Rectangle(0, 0, width, height);
+                var bmpData = bitmap.LockBits(rect, ImageLockMode.WriteOnly, bitmap.PixelFormat);
+                
+                System.Runtime.InteropServices.Marshal.Copy(rawBytes, 0, bmpData.Scan0, rawBytes.Length);
+                bitmap.UnlockBits(bmpData);
+                
+                // Create temp file path in uploads directory for debugging
+                var uploadsDir = Path.Combine(Directory.GetCurrentDirectory(), "uploads", "temp");
+                Directory.CreateDirectory(uploadsDir);
+                var tempPath = Path.Combine(uploadsDir, $"pdf_page_{Guid.NewGuid()}.png");
+                
+                // Save as PNG for better quality
+                bitmap.Save(tempPath, System.Drawing.Imaging.ImageFormat.Png);
+                bitmap.Dispose();
+                
+                _logger.LogInformation("PDF page converted to image: {TempPath} ({Width}x{Height})", tempPath, width, height);
+                return tempPath;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "PDF to image conversion failed: {PdfPath}", pdfPath);
                 return string.Empty;
             }
         });

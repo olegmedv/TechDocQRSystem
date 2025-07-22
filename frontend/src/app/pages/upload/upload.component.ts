@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { NzCardModule } from 'ng-zorro-antd/card';
@@ -14,6 +14,8 @@ import { NzSpinModule } from 'ng-zorro-antd/spin';
 import { DocumentService } from '../../services/document.service';
 import { Document } from '../../models/document.models';
 import { AuthService } from '../../services/auth.service';
+import { SignalRService, DocumentProcessingNotification } from '../../services/signalr.service';
+import { Subscription } from 'rxjs';
 
 @Component({
   selector: 'app-upload',
@@ -180,20 +182,58 @@ import { AuthService } from '../../services/auth.service';
     }
   `]
 })
-export class UploadComponent implements OnInit {
+export class UploadComponent implements OnInit, OnDestroy {
   documents: Document[] = [];
   loading = false;
   uploading = false;
   fileList: any[] = [];
+  private signalRSubscription?: Subscription;
 
   constructor(
     private documentService: DocumentService,
     private authService: AuthService,
-    private message: NzMessageService
+    private message: NzMessageService,
+    private signalRService: SignalRService
   ) {}
 
   ngOnInit(): void {
     this.loadDocuments();
+    this.subscribeToSignalR();
+  }
+
+  ngOnDestroy(): void {
+    if (this.signalRSubscription) {
+      this.signalRSubscription.unsubscribe();
+    }
+  }
+
+  private subscribeToSignalR(): void {
+    this.signalRSubscription = this.signalRService.documentUpdates$.subscribe(
+      (notification: DocumentProcessingNotification | null) => {
+        if (notification) {
+          this.handleDocumentUpdate(notification);
+        }
+      }
+    );
+  }
+
+  private handleDocumentUpdate(notification: DocumentProcessingNotification): void {
+    // Find and update the document in the list
+    const documentIndex = this.documents.findIndex(doc => doc.id === notification.documentId);
+    if (documentIndex !== -1) {
+      const document = this.documents[documentIndex];
+      
+      if (notification.status === 'completed') {
+        document.summary = notification.summary || document.summary;
+        document.tags = notification.tags || document.tags;
+      } else if (notification.status === 'failed') {
+        document.summary = 'Ошибка обработки: ' + (notification.error || 'Неизвестная ошибка');
+        document.tags = ['Ошибка'];
+      }
+      
+      // Trigger change detection
+      this.documents = [...this.documents];
+    }
   }
 
   beforeUpload = (file: any): boolean => {

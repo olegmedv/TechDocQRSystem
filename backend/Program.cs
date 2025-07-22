@@ -6,6 +6,7 @@ using System.Text;
 using TechDocQRSystem.Api.Data;
 using TechDocQRSystem.Api.Services;
 using TechDocQRSystem.Api.Middleware;
+using TechDocQRSystem.Api.Hubs;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -91,6 +92,15 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                         context.Token = authHeader.Substring(7);
                     }
                 }
+                // SignalR support - check query string for access token
+                else if (context.Request.Path.StartsWithSegments("/documentHub"))
+                {
+                    var accessToken = context.Request.Query["access_token"];
+                    if (!string.IsNullOrEmpty(accessToken))
+                    {
+                        context.Token = accessToken;
+                    }
+                }
                 return Task.CompletedTask;
             }
         };
@@ -111,7 +121,11 @@ builder.Services.AddScoped<IQrCodeService, QrCodeService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<IActivityLogService, ActivityLogService>();
 builder.Services.AddScoped<ISearchService, SearchService>();
+builder.Services.AddScoped<IDocumentNotificationService, DocumentNotificationService>();
 builder.Services.AddHttpClient();
+
+// SignalR
+builder.Services.AddSignalR();
 
 // CORS
 builder.Services.AddCors(options =>
@@ -172,6 +186,9 @@ app.UseAuthorization();
 app.UseMiddleware<ActivityLogMiddleware>();
 
 app.MapControllers();
+
+// SignalR Hub
+app.MapHub<DocumentProcessingHub>("/documentHub");
 
 // Ensure database is created with retry logic
 await EnsureDatabaseCreatedWithRetry(app.Services, app.Logger);

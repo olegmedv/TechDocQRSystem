@@ -14,11 +14,13 @@ public class DocumentService : IDocumentService
     private readonly IActivityLogService _activityLogService;
     private readonly ILogger<DocumentService> _logger;
     private readonly IServiceScopeFactory _serviceScopeFactory;
+    private readonly IDocumentNotificationService _notificationService;
 
     public DocumentService(ApplicationDbContext context, IConfiguration configuration,
                          IOcrService ocrService, IGeminiService geminiService, 
                          IQrCodeService qrCodeService, IActivityLogService activityLogService,
-                         ILogger<DocumentService> logger, IServiceScopeFactory serviceScopeFactory)
+                         ILogger<DocumentService> logger, IServiceScopeFactory serviceScopeFactory,
+                         IDocumentNotificationService notificationService)
     {
         _context = context;
         _configuration = configuration;
@@ -28,6 +30,7 @@ public class DocumentService : IDocumentService
         _activityLogService = activityLogService;
         _logger = logger;
         _serviceScopeFactory = serviceScopeFactory;
+        _notificationService = notificationService;
     }
 
     public async Task<DocumentResponseDto> UploadDocumentAsync(IFormFile file, Guid userId, string ipAddress, string? userAgent)
@@ -81,8 +84,11 @@ public class DocumentService : IDocumentService
         await _activityLogService.LogActivityAsync(userId, ActionTypes.Upload, 
             new { FileName = file.FileName, FileSize = file.Length }, ipAddress, userAgent, document.Id);
 
-        // Process document asynchronously (OCR + AI)
-        _ = Task.Run(async () => await ProcessDocumentAsync(document.Id));
+        // Notify that processing started
+        await _notificationService.NotifyDocumentProcessingStarted(userId, document.Id, file.FileName);
+
+        // Process document asynchronously (OCR + AI) with notifications
+        _ = Task.Run(async () => await ProcessDocumentAsync(document.Id, userId));
 
         return await CreateDocumentResponseDto(document);
     }
@@ -308,12 +314,13 @@ public class DocumentService : IDocumentService
         };
     }
 
-    private async Task ProcessDocumentAsync(Guid documentId)
+    private async Task ProcessDocumentAsync(Guid documentId, Guid userId)
     {
         using var scope = _serviceScopeFactory.CreateScope();
         var scopedContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var scopedOcrService = scope.ServiceProvider.GetRequiredService<IOcrService>();
         var scopedGeminiService = scope.ServiceProvider.GetRequiredService<IGeminiService>();
+        var scopedNotificationService = scope.ServiceProvider.GetRequiredService<IDocumentNotificationService>();
 
         try
         {
@@ -344,6 +351,10 @@ public class DocumentService : IDocumentService
                 await scopedContext.SaveChangesAsync();
                 
                 _logger.LogInformation("Document processing completed successfully for {DocumentId}", documentId);
+                
+                // Notify successful completion
+                await scopedNotificationService.NotifyDocumentProcessingCompleted(
+                    userId, documentId, document.Filename, summary ?? "", tags ?? new List<string>());
             }
             else
             {
@@ -355,16 +366,26 @@ public class DocumentService : IDocumentService
                 document.UpdatedAt = DateTime.UtcNow;
                 
                 await scopedContext.SaveChangesAsync();
+                
+                // Notify completion with no text found
+                await scopedNotificationService.NotifyDocumentProcessingCompleted(
+                    userId, documentId, document.Filename, document.Summary, document.Tags);
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to process document {DocumentId}", documentId);
             
+            var document = await scopedContext.Documents.FindAsync(documentId);
+            var filename = document?.Filename ?? "Unknown";
+            
+            // Notify processing failure
+            await scopedNotificationService.NotifyDocumentProcessingFailed(
+                userId, documentId, filename, ex.Message);
+            
             // Mark document with error status
             try
             {
-                var document = await scopedContext.Documents.FindAsync(documentId);
                 if (document != null)
                 {
                     document.Summary = "Ошибка при обработке документа";
