@@ -11,7 +11,10 @@
       "Bash(rm:*)",
       "Bash(dotnet ef migrations:*)",
       "Bash(touch:*)",
-      "Bash(dotnet build)"
+      "Bash(dotnet build)",
+      "Bash(git filter-branch:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ],
     "deny": []
   }
