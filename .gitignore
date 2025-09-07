@@ -91,3 +91,8 @@ cloudflared.error.log
 
 # Uploads
 /uploads/ 
+
+# Environment files
+.env
+.env.*
+!.env.example
