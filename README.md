@@ -1,4 +1,5 @@
 # TechDoc QR System
+<img width="1000" height="730" alt="project-techdoc-1000px" src="https://github.com/user-attachments/assets/66365543-ed1a-46d3-853d-b3bafa93fe75" />
 
 Technical document management system with QR code generation, OCR processing, and AI analysis.
 
